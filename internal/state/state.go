@@ -16,6 +16,7 @@ const (
 	InputImportName             // entering profile name for import
 	InputImportPath             // entering file path for import
 	InputEditEntries            // editing entries for existing profile
+	InputRenameName             // entering new name for rename
 )
 
 // AppState holds all application state, separated from UI concerns.

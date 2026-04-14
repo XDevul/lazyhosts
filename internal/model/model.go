@@ -208,7 +208,30 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.state.TextBuffer = "Loading..."
 			return m, m.loadProfileEntries(sel.Name)
 		} else if sel != nil && sel.Name == "default" {
-			m.state.SetStatus("Cannot edit the default profile", true)
+			m.state.SetStatus("default profile is managed by /etc/hosts directly, not editable via hostctl", true)
+			return m, m.clearStatusAfter(3 * time.Second)
+		}
+
+	case key.Matches(msg, m.keys.Delete):
+		sel := m.state.SelectedProfile()
+		if sel != nil && sel.Name != "default" {
+			m.state.ShowConfirm = true
+			m.state.ConfirmAction = "Delete"
+			m.state.ConfirmTarget = sel.Name
+		} else if sel != nil && sel.Name == "default" {
+			m.state.SetStatus("default profile cannot be deleted", true)
+			return m, m.clearStatusAfter(3 * time.Second)
+		}
+
+	case key.Matches(msg, m.keys.Rename):
+		sel := m.state.SelectedProfile()
+		if sel != nil && sel.Name != "default" {
+			m.state.InputMode = state.InputRenameName
+			m.state.InputLabel = "Rename '" + sel.Name + "' to:"
+			m.state.EditTarget = sel.Name
+			m.state.InputBuffer = ""
+		} else if sel != nil && sel.Name == "default" {
+			m.state.SetStatus("default profile cannot be renamed", true)
 			return m, m.clearStatusAfter(3 * time.Second)
 		}
 
@@ -246,6 +269,9 @@ func (m Model) handleInputKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if len(m.state.InputBuffer) > 0 {
 			m.state.InputBuffer = m.state.InputBuffer[:len(m.state.InputBuffer)-1]
 		}
+
+	case tea.KeySpace:
+		m.state.InputBuffer += " "
 
 	case tea.KeyRunes:
 		m.state.InputBuffer += string(msg.Runes)
@@ -296,6 +322,21 @@ func (m Model) submitSingleLineInput() (tea.Model, tea.Cmd) {
 		m.state.Loading = true
 		m.state.SetStatus("Importing profile...", false)
 		return m, m.importProfile(name, filePath)
+
+	case state.InputRenameName:
+		// Check if new name already exists
+		for _, p := range m.state.Profiles {
+			if strings.EqualFold(p.Name, value) {
+				m.state.SetStatus("Profile '"+value+"' already exists", true)
+				return m, m.clearStatusAfter(3 * time.Second)
+			}
+		}
+		oldName := m.state.EditTarget
+		newName := value
+		m.state.ResetInput()
+		m.state.Loading = true
+		m.state.SetStatus("Renaming '"+oldName+"' to '"+newName+"'...", false)
+		return m, m.renameProfile(oldName, newName)
 	}
 
 	return m, nil
@@ -351,6 +392,8 @@ func (m Model) handleTextEditorKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.editorMoveLeft()
 	case tea.KeyRight:
 		m.editorMoveRight(lines, row)
+	case tea.KeySpace:
+		m.editorInsertRunes(lines, row, col, []rune{' '})
 	case tea.KeyRunes:
 		m.editorInsertRunes(lines, row, col, msg.Runes)
 	}
@@ -505,10 +548,14 @@ func (m Model) handleConfirmKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.state.Loading = true
 		m.state.SetStatus("Executing...", false)
 
-		if action == "Enable" {
+		switch action {
+		case "Enable":
 			return m, m.enableProfile(target)
+		case "Delete":
+			return m, m.deleteProfile(target)
+		default:
+			return m, m.disableProfile(target)
 		}
-		return m, m.disableProfile(target)
 
 	case key.Matches(msg, m.keys.No), key.Matches(msg, m.keys.Escape):
 		m.state.ShowConfirm = false
@@ -596,6 +643,20 @@ func (m Model) updateProfile(name string, entries string) tea.Cmd {
 	return func() tea.Msg {
 		result := hostctl.UpdateProfile(name, entries)
 		return commandDoneMsg{result: result, action: "Update " + name}
+	}
+}
+
+func (m Model) deleteProfile(name string) tea.Cmd {
+	return func() tea.Msg {
+		result := hostctl.RemoveProfile(name)
+		return commandDoneMsg{result: result, action: "Delete " + name}
+	}
+}
+
+func (m Model) renameProfile(oldName, newName string) tea.Cmd {
+	return func() tea.Msg {
+		result := hostctl.RenameProfile(oldName, newName)
+		return commandDoneMsg{result: result, action: "Rename " + oldName + " → " + newName}
 	}
 }
 

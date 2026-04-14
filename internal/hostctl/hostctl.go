@@ -176,6 +176,38 @@ func RemoveProfile(name string) Result {
 	return runSudoHostctl("remove", name)
 }
 
+// RenameProfile renames a profile by reading its entries, removing the old, and adding with the new name.
+func RenameProfile(oldName, newName string) Result {
+	if err := validateName(oldName); err != nil {
+		return Result{Error: err, ExecutedAt: time.Now()}
+	}
+	if err := validateName(newName); err != nil {
+		return Result{Error: err, ExecutedAt: time.Now()}
+	}
+
+	// Read existing entries
+	entries, err := GetProfileEntries(oldName)
+	if err != nil {
+		return Result{Error: fmt.Errorf("rename failed: %w", err), ExecutedAt: time.Now()}
+	}
+
+	// Remove old profile
+	removeResult := RemoveProfile(oldName)
+	if removeResult.Error != nil {
+		return removeResult
+	}
+
+	// Add with new name
+	addResult := AddProfile(newName, entries)
+	if addResult.Error != nil {
+		// Attempt to restore old profile on failure
+		AddProfile(oldName, entries)
+		return addResult
+	}
+
+	return Result{Output: addResult.Output, ExecutedAt: time.Now()}
+}
+
 // UpdateProfile replaces a profile's entries by removing then re-adding.
 func UpdateProfile(name string, entries string) Result {
 	if err := validateName(name); err != nil {
@@ -194,7 +226,7 @@ func GetProfileEntries(name string) (string, error) {
 		return "", err
 	}
 
-	out, err := exec.Command("hostctl", "list", "-p", name, "-o", "json").CombinedOutput()
+	out, err := exec.Command("hostctl", "list", name, "-o", "json").CombinedOutput()
 	if err != nil {
 		return "", fmt.Errorf("failed to get profile entries: %w\n%s", err, string(out))
 	}
@@ -211,17 +243,27 @@ func GetProfileEntries(name string) (string, error) {
 	return strings.Join(lines, "\n"), nil
 }
 
-// ShowProfile returns the detail of a specific profile.
+// ShowProfile returns a compact detail of a specific profile (IP → DOMAIN).
 func ShowProfile(name string) Result {
 	if err := validateName(name); err != nil {
 		return Result{Error: err, ExecutedAt: time.Now()}
 	}
 
-	out, err := exec.Command("hostctl", "list", "-p", name).CombinedOutput()
+	out, err := exec.Command("hostctl", "list", name, "-o", "json").CombinedOutput()
 	if err != nil {
 		return Result{Error: fmt.Errorf("show profile failed: %w\n%s", err, string(out)), ExecutedAt: time.Now()}
 	}
-	return Result{Output: string(out), ExecutedAt: time.Now()}
+
+	var entries []HostEntry
+	if err := json.Unmarshal(out, &entries); err != nil {
+		return Result{Error: fmt.Errorf("parse profile failed: %w", err), ExecutedAt: time.Now()}
+	}
+
+	var lines []string
+	for _, e := range entries {
+		lines = append(lines, fmt.Sprintf("%-15s  %s", e.IP, e.Host))
+	}
+	return Result{Output: strings.Join(lines, "\n"), ExecutedAt: time.Now()}
 }
 
 // parseJSON parses hostctl JSON output, deduplicating profiles.

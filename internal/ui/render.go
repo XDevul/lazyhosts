@@ -130,49 +130,99 @@ func (r *Renderer) renderProfileList(s *state.AppState, width, height int) strin
 }
 
 func (r *Renderer) renderDetailPanel(s *state.AppState, width, height int) string {
+	// Budget total lines to prevent overflow. height = usable lines inside panel border.
+	budget := height - 2 // leave margin
+	if budget < 10 {
+		budget = 10
+	}
+
 	title := TitleStyle.Render(" Details")
 	var sections []string
 	sections = append(sections, title)
 	sections = append(sections, "")
+	used := 2
 
 	// Active profiles
 	active := s.ActiveProfiles()
 	sections = append(sections, DetailLabelStyle.Render("  Active Profiles:"))
+	used++
 	if len(active) == 0 {
 		sections = append(sections, HelpDescStyle.Render("    None"))
+		used++
 	} else {
 		for _, name := range active {
+			if used >= budget-6 {
+				break
+			}
 			sections = append(sections, EnabledStyle.Render(fmt.Sprintf("    ● %s", name)))
+			used++
 		}
 	}
 	sections = append(sections, "")
+	used++
 
 	// Last switch
-	if !s.LastSwitchTime.IsZero() {
+	if !s.LastSwitchTime.IsZero() && used < budget-6 {
 		sections = append(sections, DetailLabelStyle.Render("  Last Switch:"))
 		sections = append(sections, DetailValueStyle.Render(
 			fmt.Sprintf("    %s", s.LastSwitchTime.Format("2006-01-02 15:04:05")),
 		))
 		sections = append(sections, "")
+		used += 3
 	}
 
-	// Selected profile detail
+	// Selected profile detail — use remaining budget, split between detail and preview
 	sel := s.SelectedProfile()
+	remaining := budget - used - 4 // reserve 4 lines for sudo + spacing
+	if remaining < 4 {
+		remaining = 4
+	}
+
 	if sel != nil && s.ProfileDetail != "" {
-		sections = append(sections, DetailLabelStyle.Render(fmt.Sprintf("  Profile: %s", sel.Name)))
+		detailBudget := remaining * 2 / 3
+		if detailBudget < 3 {
+			detailBudget = 3
+		}
+
+		sections = append(sections, DetailLabelStyle.Render(fmt.Sprintf("  Profile: %s (%d entries)", sel.Name, sel.Entries)))
 		sections = append(sections, "")
-		for _, line := range strings.Split(s.ProfileDetail, "\n") {
+		used += 2
+
+		detailLines := strings.Split(s.ProfileDetail, "\n")
+		for i, line := range detailLines {
+			if i >= detailBudget {
+				sections = append(sections, HelpDescStyle.Render(fmt.Sprintf("  ... and %d more", len(detailLines)-i)))
+				used++
+				break
+			}
 			sections = append(sections, HelpDescStyle.Render("  "+line))
+			used++
 		}
 		sections = append(sections, "")
+		used++
+
+		remaining = budget - used - 3
 	}
 
-	// Hosts preview
-	if s.HostsPreview != "" {
+	// Hosts preview — use whatever remains
+	if s.HostsPreview != "" && remaining > 2 {
 		sections = append(sections, DetailLabelStyle.Render("  /etc/hosts preview:"))
 		sections = append(sections, "")
-		for _, line := range strings.Split(s.HostsPreview, "\n") {
+		used += 2
+
+		previewBudget := remaining - 2
+		if previewBudget < 2 {
+			previewBudget = 2
+		}
+		previewLines := strings.Split(s.HostsPreview, "\n")
+		for i, line := range previewLines {
+			if i >= previewBudget {
+				sections = append(sections, HelpDescStyle.Render(fmt.Sprintf("  ... (%d more lines)", len(previewLines)-i)))
+				used++
+				break
+			}
 			sections = append(sections, HelpDescStyle.Render("  "+line))
+			used++
 		}
 	}
 
@@ -201,7 +251,7 @@ func (r *Renderer) renderStatusBar(s *state.AppState) string {
 			left = SuccessStyle.Render("  " + s.StatusMessage)
 		}
 	} else {
-		left = HelpDescStyle.Render("  ? help  q quit  / search  a add  e edit  i import")
+		left = HelpDescStyle.Render("  ? help  q quit  / search  a add  e edit  d disable  R rename  x delete  i import")
 	}
 
 	return StatusBarStyle.Width(r.width).Render(left)
@@ -287,6 +337,8 @@ func (r *Renderer) overlayInput(s *state.AppState) string {
 		title = "Import From File"
 	case state.InputEditEntries:
 		title = "Edit Profile"
+	case state.InputRenameName:
+		title = "Rename Profile"
 	}
 	lines = append(lines, HeaderStyle.Render(title))
 	lines = append(lines, "")

@@ -18,6 +18,8 @@ type KeyMap struct {
 	Add     key.Binding
 	Import  key.Binding
 	Edit    key.Binding
+	Delete  key.Binding
+	Rename  key.Binding
 }
 
 // DefaultKeyMap returns the default set of key bindings.
@@ -79,6 +81,14 @@ func DefaultKeyMap() KeyMap {
 			key.WithKeys("e"),
 			key.WithHelp("e", "edit profile"),
 		),
+		Delete: key.NewBinding(
+			key.WithKeys("x"),
+			key.WithHelp("x", "delete profile"),
+		),
+		Rename: key.NewBinding(
+			key.WithKeys("R"),
+			key.WithHelp("R", "rename profile"),
+		),
 	}
 }
 
@@ -91,6 +101,8 @@ func HelpEntries() [][]string {
 		{"d", "Disable selected profile"},
 		{"a", "Add new profile"},
 		{"e", "Edit selected profile"},
+		{"R", "Rename selected profile"},
+		{"x", "Delete selected profile"},
 		{"i", "Import profile from file"},
 		{"r", "Reload profile list"},
 		{"/", "Search / filter profiles"},
