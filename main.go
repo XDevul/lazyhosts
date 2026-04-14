@@ -17,6 +17,17 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Always acquire sudo credentials before TUI starts.
+	// This ensures a fresh credential cache even if a prior one is about to expire.
+	fmt.Println("lazyhosts needs sudo to modify /etc/hosts.")
+	if err := hostctl.AcquireSudo(); err != nil {
+		fmt.Fprintln(os.Stderr, "Warning: failed to acquire sudo. Some features will be unavailable.")
+	}
+
+	// Keep sudo alive in the background while TUI is running.
+	stopKeepalive := hostctl.SudoKeepalive()
+	defer stopKeepalive()
+
 	p := tea.NewProgram(
 		model.New(),
 		tea.WithAltScreen(),

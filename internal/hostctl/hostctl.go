@@ -314,3 +314,32 @@ func HasSudo() bool {
 	err := exec.Command("sudo", "-n", "true").Run()
 	return err == nil
 }
+
+// AcquireSudo runs `sudo -v` interactively so the user can enter their password.
+// This must be called BEFORE the TUI starts (before AltScreen takes over).
+func AcquireSudo() error {
+	cmd := exec.Command("sudo", "-v")
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	return cmd.Run()
+}
+
+// SudoKeepalive starts a background goroutine that refreshes sudo credentials
+// every 2 minutes. Returns a stop function to cancel the keepalive.
+func SudoKeepalive() (stop func()) {
+	done := make(chan struct{})
+	go func() {
+		ticker := time.NewTicker(2 * time.Minute)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				exec.Command("sudo", "-v", "-n").Run()
+			case <-done:
+				return
+			}
+		}
+	}()
+	return func() { close(done) }
+}
