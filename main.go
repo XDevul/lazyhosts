@@ -13,18 +13,26 @@ func main() {
 	if !hostctl.IsInstalled() {
 		fmt.Fprintln(os.Stderr, "Error: hostctl is not installed.")
 		fmt.Fprintln(os.Stderr, "Install it from: https://github.com/guumaster/hostctl")
-		fmt.Fprintln(os.Stderr, "  brew install guumaster/tap/hostctl")
+		if hostctl.NeedsSudo() {
+			fmt.Fprintln(os.Stderr, "  brew install guumaster/tap/hostctl")
+		} else {
+			fmt.Fprintln(os.Stderr, "  scoop install hostctl")
+		}
 		os.Exit(1)
 	}
 
-	// Always acquire sudo credentials before TUI starts.
-	// This ensures a fresh credential cache even if a prior one is about to expire.
-	fmt.Println("lazyhosts needs sudo to modify /etc/hosts.")
-	if err := hostctl.AcquireSudo(); err != nil {
-		fmt.Fprintln(os.Stderr, "Warning: failed to acquire sudo. Some features will be unavailable.")
+	// Acquire elevated privileges before TUI starts.
+	if hostctl.NeedsSudo() {
+		fmt.Println("lazyhosts needs sudo to modify /etc/hosts.")
+		if err := hostctl.AcquireSudo(); err != nil {
+			fmt.Fprintln(os.Stderr, "Warning: failed to acquire sudo. Some features will be unavailable.")
+		}
+	} else if !hostctl.HasElevatedPrivilege() {
+		fmt.Fprintln(os.Stderr, "Warning: not running as Administrator. Some features will be unavailable.")
+		fmt.Fprintln(os.Stderr, "Please right-click your terminal and select \"Run as administrator\".")
 	}
 
-	// Keep sudo alive in the background while TUI is running.
+	// Keep sudo alive in the background while TUI is running (no-op on Windows).
 	stopKeepalive := hostctl.SudoKeepalive()
 	defer stopKeepalive()
 

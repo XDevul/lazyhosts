@@ -661,7 +661,7 @@ func (m Model) renameProfile(oldName, newName string) tea.Cmd {
 }
 
 func (m Model) checkSudo() tea.Msg {
-	return sudoCheckMsg{hasSudo: hostctl.HasSudo()}
+	return sudoCheckMsg{hasSudo: hostctl.HasElevatedPrivilege()}
 }
 
 func (m Model) clearStatusAfter(d time.Duration) tea.Cmd {

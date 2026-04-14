@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 	"time"
 )
@@ -65,31 +66,62 @@ func validateFilePath(path string) error {
 	return nil
 }
 
-// runSudoHostctl executes a hostctl subcommand with sudo -n, handling
-// common sudo permission errors consistently.
-func runSudoHostctl(args ...string) Result {
-	cmdArgs := append([]string{"-n", "hostctl"}, args...)
-	out, err := exec.Command("sudo", cmdArgs...).CombinedOutput()
-	if err != nil {
-		if strings.Contains(string(out), "sudo") || strings.Contains(string(out), "password") {
+// runElevatedHostctl executes a hostctl subcommand with elevated privileges.
+// On Unix, uses sudo -n. On Windows, runs hostctl directly (requires admin terminal).
+func runElevatedHostctl(args ...string) Result {
+	var out []byte
+	var err error
+
+	if runtime.GOOS == "windows" {
+		out, err = exec.Command("hostctl", args...).CombinedOutput()
+		if err != nil {
+			outStr := string(out)
+			if strings.Contains(outStr, "Access is denied") || strings.Contains(outStr, "requires elevation") {
+				return Result{
+					Error:      fmt.Errorf("administrator required — please run this terminal as Administrator"),
+					ExecutedAt: time.Now(),
+				}
+			}
 			return Result{
-				Error:      fmt.Errorf("sudo required — run 'sudo -v' first, then retry"),
+				Error:      fmt.Errorf("hostctl %s failed: %w\n%s", args[0], err, outStr),
 				ExecutedAt: time.Now(),
 			}
 		}
-		return Result{
-			Error:      fmt.Errorf("hostctl %s failed: %w\n%s", args[0], err, string(out)),
-			ExecutedAt: time.Now(),
+	} else {
+		cmdArgs := append([]string{"-n", "hostctl"}, args...)
+		out, err = exec.Command("sudo", cmdArgs...).CombinedOutput()
+		if err != nil {
+			outStr := string(out)
+			if strings.Contains(outStr, "sudo") || strings.Contains(outStr, "password") {
+				return Result{
+					Error:      fmt.Errorf("sudo required — run 'sudo -v' first, then retry"),
+					ExecutedAt: time.Now(),
+				}
+			}
+			return Result{
+				Error:      fmt.Errorf("hostctl %s failed: %w\n%s", args[0], err, outStr),
+				ExecutedAt: time.Now(),
+			}
 		}
 	}
+
 	return Result{Output: string(out), ExecutedAt: time.Now()}
 }
 
-// HostsPreview reads the first n lines of /etc/hosts.
+// hostsFilePath returns the OS-specific hosts file path.
+func hostsFilePath() string {
+	if runtime.GOOS == "windows" {
+		return filepath.Join(os.Getenv("SystemRoot"), "System32", "drivers", "etc", "hosts")
+	}
+	return "/etc/hosts"
+}
+
+// HostsPreview reads the first n lines of the hosts file.
 func HostsPreview(n int) (string, error) {
-	f, err := os.Open("/etc/hosts")
+	hostsPath := hostsFilePath()
+	f, err := os.Open(hostsPath)
 	if err != nil {
-		return "", fmt.Errorf("cannot read /etc/hosts: %w", err)
+		return "", fmt.Errorf("cannot read %s: %w", hostsPath, err)
 	}
 	defer f.Close()
 
@@ -120,7 +152,7 @@ func EnableProfile(name string) Result {
 	if err := validateName(name); err != nil {
 		return Result{Error: err, ExecutedAt: time.Now()}
 	}
-	return runSudoHostctl("enable", name)
+	return runElevatedHostctl("enable", name)
 }
 
 // DisableProfile disables a profile via hostctl. Requires sudo.
@@ -128,7 +160,7 @@ func DisableProfile(name string) Result {
 	if err := validateName(name); err != nil {
 		return Result{Error: err, ExecutedAt: time.Now()}
 	}
-	return runSudoHostctl("disable", name)
+	return runElevatedHostctl("disable", name)
 }
 
 // AddProfile creates a new profile with the given host entries.
@@ -150,7 +182,7 @@ func AddProfile(name string, entries string) Result {
 	}
 	tmpFile.Close()
 
-	return runSudoHostctl("add", name, "--from", tmpFile.Name())
+	return runElevatedHostctl("add", name, "--from", tmpFile.Name())
 }
 
 // ImportProfile creates a new profile from an existing file.
@@ -165,7 +197,7 @@ func ImportProfile(name string, filePath string) Result {
 		return Result{Error: fmt.Errorf("file not found: %s", filePath), ExecutedAt: time.Now()}
 	}
 
-	return runSudoHostctl("add", name, "--from", filePath)
+	return runElevatedHostctl("add", name, "--from", filePath)
 }
 
 // RemoveProfile removes a profile entirely.
@@ -173,7 +205,7 @@ func RemoveProfile(name string) Result {
 	if err := validateName(name); err != nil {
 		return Result{Error: err, ExecutedAt: time.Now()}
 	}
-	return runSudoHostctl("remove", name)
+	return runElevatedHostctl("remove", name)
 }
 
 // RenameProfile renames a profile by reading its entries, removing the old, and adding with the new name.
@@ -309,15 +341,36 @@ func IsInstalled() bool {
 	return err == nil
 }
 
-// HasSudo checks if we can run sudo non-interactively.
-func HasSudo() bool {
+// NeedsSudo returns true if the current OS requires sudo for privilege elevation.
+func NeedsSudo() bool {
+	return runtime.GOOS != "windows"
+}
+
+// HasElevatedPrivilege checks if we have the required privileges.
+// On Unix: checks sudo credential cache. On Windows: checks if running as Administrator.
+func HasElevatedPrivilege() bool {
+	if runtime.GOOS == "windows" {
+		// Try writing to a protected path to detect admin privileges.
+		f, err := os.CreateTemp(filepath.Join(os.Getenv("SystemRoot"), "System32"), "lazyhosts-check-*.tmp")
+		if err != nil {
+			return false
+		}
+		name := f.Name()
+		f.Close()
+		os.Remove(name)
+		return true
+	}
 	err := exec.Command("sudo", "-n", "true").Run()
 	return err == nil
 }
 
 // AcquireSudo runs `sudo -v` interactively so the user can enter their password.
 // This must be called BEFORE the TUI starts (before AltScreen takes over).
+// On Windows this is a no-op (admin must be granted when opening the terminal).
 func AcquireSudo() error {
+	if runtime.GOOS == "windows" {
+		return nil
+	}
 	cmd := exec.Command("sudo", "-v")
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
@@ -327,8 +380,12 @@ func AcquireSudo() error {
 
 // SudoKeepalive starts a background goroutine that refreshes sudo credentials
 // every 2 minutes. Returns a stop function to cancel the keepalive.
+// On Windows this is a no-op.
 func SudoKeepalive() (stop func()) {
 	done := make(chan struct{})
+	if runtime.GOOS == "windows" {
+		return func() { close(done) }
+	}
 	go func() {
 		ticker := time.NewTicker(2 * time.Minute)
 		defer ticker.Stop()

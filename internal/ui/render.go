@@ -2,6 +2,7 @@ package ui
 
 import (
 	"fmt"
+	"runtime"
 	"strings"
 	"unicode/utf8"
 
@@ -206,7 +207,11 @@ func (r *Renderer) renderDetailPanel(s *state.AppState, width, height int) strin
 
 	// Hosts preview — use whatever remains
 	if s.HostsPreview != "" && remaining > 2 {
-		sections = append(sections, DetailLabelStyle.Render("  /etc/hosts preview:"))
+		hostsLabel := "/etc/hosts preview:"
+		if runtime.GOOS == "windows" {
+			hostsLabel = "hosts file preview:"
+		}
+		sections = append(sections, DetailLabelStyle.Render("  "+hostsLabel))
 		sections = append(sections, "")
 		used += 2
 
@@ -226,12 +231,16 @@ func (r *Renderer) renderDetailPanel(s *state.AppState, width, height int) strin
 		}
 	}
 
-	// Sudo status
+	// Privilege status
 	sections = append(sections, "")
 	if s.HasSudo {
-		sections = append(sections, EnabledStyle.Render("  ✓ sudo available"))
+		sections = append(sections, EnabledStyle.Render("  ✓ elevated privileges available"))
 	} else {
-		sections = append(sections, ErrorStyle.Render("  ✗ sudo not available (run: sudo -v)"))
+		if runtime.GOOS == "windows" {
+			sections = append(sections, ErrorStyle.Render("  ✗ not administrator (run terminal as admin)"))
+		} else {
+			sections = append(sections, ErrorStyle.Render("  ✗ sudo not available (run: sudo -v)"))
+		}
 	}
 
 	content := strings.Join(sections, "\n")
