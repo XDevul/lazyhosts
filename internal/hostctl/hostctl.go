@@ -298,6 +298,58 @@ func ShowProfile(name string) Result {
 	return Result{Output: strings.Join(lines, "\n"), ExecutedAt: time.Now()}
 }
 
+// CopyProfile duplicates a profile's entries under a new name.
+func CopyProfile(srcName, newName string) Result {
+	if err := validateName(srcName); err != nil {
+		return Result{Error: err, ExecutedAt: time.Now()}
+	}
+	if err := validateName(newName); err != nil {
+		return Result{Error: err, ExecutedAt: time.Now()}
+	}
+
+	entries, err := GetProfileEntries(srcName)
+	if err != nil {
+		return Result{Error: fmt.Errorf("copy failed: %w", err), ExecutedAt: time.Now()}
+	}
+
+	return AddProfile(newName, entries)
+}
+
+// BatchChangeIP replaces all IPs in a profile with the given new IP.
+func BatchChangeIP(name string, newIP string) Result {
+	if err := validateName(name); err != nil {
+		return Result{Error: err, ExecutedAt: time.Now()}
+	}
+	newIP = strings.TrimSpace(newIP)
+	if newIP == "" {
+		return Result{Error: fmt.Errorf("IP cannot be empty"), ExecutedAt: time.Now()}
+	}
+
+	entries, err := GetProfileEntries(name)
+	if err != nil {
+		return Result{Error: fmt.Errorf("batch change IP failed: %w", err), ExecutedAt: time.Now()}
+	}
+
+	var newLines []string
+	for _, line := range strings.Split(entries, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		fields := strings.Fields(line)
+		if len(fields) >= 2 {
+			fields[0] = newIP
+			newLines = append(newLines, strings.Join(fields, " "))
+		}
+	}
+
+	if len(newLines) == 0 {
+		return Result{Error: fmt.Errorf("no entries to update"), ExecutedAt: time.Now()}
+	}
+
+	return UpdateProfile(name, strings.Join(newLines, "\n"))
+}
+
 // parseJSON parses hostctl JSON output, deduplicating profiles.
 func parseJSON(data []byte) []Profile {
 	var entries []HostEntry

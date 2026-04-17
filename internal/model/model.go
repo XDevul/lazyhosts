@@ -235,6 +235,30 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, m.clearStatusAfter(3 * time.Second)
 		}
 
+	case key.Matches(msg, m.keys.Copy):
+		sel := m.state.SelectedProfile()
+		if sel != nil && sel.Name != "default" {
+			m.state.InputMode = state.InputCopyName
+			m.state.InputLabel = "Copy '" + sel.Name + "' as:"
+			m.state.EditTarget = sel.Name
+			m.state.InputBuffer = ""
+		} else if sel != nil && sel.Name == "default" {
+			m.state.SetStatus("default profile cannot be copied", true)
+			return m, m.clearStatusAfter(3 * time.Second)
+		}
+
+	case key.Matches(msg, m.keys.BatchIP):
+		sel := m.state.SelectedProfile()
+		if sel != nil && sel.Name != "default" {
+			m.state.InputMode = state.InputBatchIP
+			m.state.InputLabel = "New IP for all entries in '" + sel.Name + "':"
+			m.state.EditTarget = sel.Name
+			m.state.InputBuffer = ""
+		} else if sel != nil && sel.Name == "default" {
+			m.state.SetStatus("default profile cannot be modified", true)
+			return m, m.clearStatusAfter(3 * time.Second)
+		}
+
 	case key.Matches(msg, m.keys.Reload):
 		m.state.Loading = true
 		m.state.SetStatus("Reloading...", false)
@@ -337,6 +361,29 @@ func (m Model) submitSingleLineInput() (tea.Model, tea.Cmd) {
 		m.state.Loading = true
 		m.state.SetStatus("Renaming '"+oldName+"' to '"+newName+"'...", false)
 		return m, m.renameProfile(oldName, newName)
+
+	case state.InputCopyName:
+		// Check if new name already exists
+		for _, p := range m.state.Profiles {
+			if strings.EqualFold(p.Name, value) {
+				m.state.SetStatus("Profile '"+value+"' already exists", true)
+				return m, m.clearStatusAfter(3 * time.Second)
+			}
+		}
+		srcName := m.state.EditTarget
+		newName := value
+		m.state.ResetInput()
+		m.state.Loading = true
+		m.state.SetStatus("Copying '"+srcName+"' to '"+newName+"'...", false)
+		return m, m.copyProfile(srcName, newName)
+
+	case state.InputBatchIP:
+		name := m.state.EditTarget
+		newIP := value
+		m.state.ResetInput()
+		m.state.Loading = true
+		m.state.SetStatus("Changing all IPs in '"+name+"' to "+newIP+"...", false)
+		return m, m.batchChangeIP(name, newIP)
 	}
 
 	return m, nil
@@ -657,6 +704,20 @@ func (m Model) renameProfile(oldName, newName string) tea.Cmd {
 	return func() tea.Msg {
 		result := hostctl.RenameProfile(oldName, newName)
 		return commandDoneMsg{result: result, action: "Rename " + oldName + " → " + newName}
+	}
+}
+
+func (m Model) copyProfile(srcName, newName string) tea.Cmd {
+	return func() tea.Msg {
+		result := hostctl.CopyProfile(srcName, newName)
+		return commandDoneMsg{result: result, action: "Copy " + srcName + " → " + newName}
+	}
+}
+
+func (m Model) batchChangeIP(name string, newIP string) tea.Cmd {
+	return func() tea.Msg {
+		result := hostctl.BatchChangeIP(name, newIP)
+		return commandDoneMsg{result: result, action: "Batch change IP for " + name}
 	}
 }
 

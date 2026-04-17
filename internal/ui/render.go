@@ -260,7 +260,7 @@ func (r *Renderer) renderStatusBar(s *state.AppState) string {
 			left = SuccessStyle.Render("  " + s.StatusMessage)
 		}
 	} else {
-		left = HelpDescStyle.Render("  ? help  q quit  / search  a add  e edit  d disable  R rename  x delete  i import")
+		left = HelpDescStyle.Render("  ? help  q quit  / search  a add  e edit  d disable  R rename  c copy  I batch-ip  x delete  i import")
 	}
 
 	return StatusBarStyle.Width(r.width).Render(left)
@@ -348,6 +348,10 @@ func (r *Renderer) overlayInput(s *state.AppState) string {
 		title = "Edit Profile"
 	case state.InputRenameName:
 		title = "Rename Profile"
+	case state.InputCopyName:
+		title = "Copy Profile"
+	case state.InputBatchIP:
+		title = "Batch Change IP"
 	}
 	lines = append(lines, HeaderStyle.Render(title))
 	lines = append(lines, "")

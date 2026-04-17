@@ -17,6 +17,8 @@ const (
 	InputImportPath             // entering file path for import
 	InputEditEntries            // editing entries for existing profile
 	InputRenameName             // entering new name for rename
+	InputCopyName               // entering new name for copy
+	InputBatchIP                // entering new IP for batch change
 )
 
 // AppState holds all application state, separated from UI concerns.

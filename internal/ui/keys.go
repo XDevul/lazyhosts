@@ -20,6 +20,8 @@ type KeyMap struct {
 	Edit    key.Binding
 	Delete  key.Binding
 	Rename  key.Binding
+	Copy    key.Binding
+	BatchIP key.Binding
 }
 
 // DefaultKeyMap returns the default set of key bindings.
@@ -89,6 +91,14 @@ func DefaultKeyMap() KeyMap {
 			key.WithKeys("R"),
 			key.WithHelp("R", "rename profile"),
 		),
+		Copy: key.NewBinding(
+			key.WithKeys("c"),
+			key.WithHelp("c", "copy profile"),
+		),
+		BatchIP: key.NewBinding(
+			key.WithKeys("I"),
+			key.WithHelp("I", "batch change IP"),
+		),
 	}
 }
 
@@ -103,6 +113,8 @@ func HelpEntries() [][]string {
 		{"e", "Edit selected profile"},
 		{"R", "Rename selected profile"},
 		{"x", "Delete selected profile"},
+		{"c", "Copy selected profile"},
+		{"I", "Batch change IP"},
 		{"i", "Import profile from file"},
 		{"r", "Reload profile list"},
 		{"/", "Search / filter profiles"},
