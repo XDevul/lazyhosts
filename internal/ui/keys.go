@@ -109,7 +109,7 @@ func HelpEntries() [][]string {
 		{"↓ / j", "Move down"},
 		{"Enter", "Enable selected profile"},
 		{"d", "Disable selected profile"},
-		{"a", "Add new profile"},
+		{"a", "Add profile (paste a hosts block)"},
 		{"e", "Edit selected profile"},
 		{"R", "Rename selected profile"},
 		{"x", "Delete selected profile"},
@@ -123,6 +123,7 @@ func HelpEntries() [][]string {
 		{"q", "Quit"},
 		{"", ""},
 		{"", "In editor:"},
+		{"paste", "Paste a whole hosts block (comments ignored)"},
 		{"Ctrl+S", "Save & submit"},
 		{"Esc", "Cancel"},
 	}

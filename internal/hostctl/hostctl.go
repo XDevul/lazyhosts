@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -179,6 +180,41 @@ func DisableProfile(name string) Result {
 		return Result{Error: err, ExecutedAt: time.Now()}
 	}
 	return runElevatedHostctl("disable", name)
+}
+
+// ParseHostsContent normalizes raw hosts-file content into "IP HOST" lines.
+// It accepts text pasted straight from a hosts file: comments (#...) and blank
+// lines are dropped, and a line holding several hostnames for one IP is expanded
+// into one line per hostname. Duplicate IP/host pairs are kept only once.
+// skipped counts the non-empty lines that did not yield a valid entry.
+func ParseHostsContent(raw string) (entries string, skipped int) {
+	seen := make(map[string]bool)
+	var lines []string
+
+	for _, line := range strings.Split(raw, "\n") {
+		if i := strings.IndexByte(line, '#'); i >= 0 {
+			line = line[:i]
+		}
+		fields := strings.Fields(line)
+		if len(fields) == 0 {
+			continue
+		}
+		if len(fields) < 2 || net.ParseIP(fields[0]) == nil {
+			skipped++
+			continue
+		}
+		ip := fields[0]
+		for _, host := range fields[1:] {
+			entry := ip + " " + host
+			if seen[entry] {
+				continue
+			}
+			seen[entry] = true
+			lines = append(lines, entry)
+		}
+	}
+
+	return strings.Join(lines, "\n"), skipped
 }
 
 // AddProfile creates a new profile with the given host entries.

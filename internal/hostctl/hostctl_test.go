@@ -69,6 +69,9 @@ func TestValidateName(t *testing.T) {
 		"foo\nbar",
 		"$(whoami)",
 		"`id`",
+		"EAS",        // hostctl writes capitals but never lists them back
+		"EAS-PMO",    //
+		"My_Profile", //
 	}
 	for _, name := range invalid {
 		if err := validateName(name); err == nil {
@@ -270,5 +273,66 @@ func TestBatchChangeIPIntegration(t *testing.T) {
 		if len(fields) >= 2 && fields[0] != "192.168.1.100" {
 			t.Errorf("expected IP 192.168.1.100, got %q in line %q", fields[0], line)
 		}
+	}
+}
+
+func TestParseHostsContent(t *testing.T) {
+	raw := `# ============================================================
+# Enterprise AI Stack 一體機（DGX Spark）
+# 產生時間：2026-09-02 11:21　本機 IP：192.168.4.172
+# ============================================================
+
+# ── 入口與主要產品 ──
+192.168.4.172  eip.ai-stack.dgxspark              # 入口網（從這裡進最方便）
+192.168.4.172  chat.ai-stack.dgxspark             # NexusMind 智能知識中樞
+
+# ── 舊網域（.local）──
+192.168.4.172  eip.ai-stack.local chat.ai-stack.local hireagent.ai-stack.local
+192.168.4.172  eip.ai-stack.local
+::1 localhost6
+garbage line without ip
+10.0.0.1
+`
+
+	entries, skipped := ParseHostsContent(raw)
+	lines := strings.Split(entries, "\n")
+
+	want := []string{
+		"192.168.4.172 eip.ai-stack.dgxspark",
+		"192.168.4.172 chat.ai-stack.dgxspark",
+		"192.168.4.172 eip.ai-stack.local",
+		"192.168.4.172 chat.ai-stack.local",
+		"192.168.4.172 hireagent.ai-stack.local",
+		"::1 localhost6",
+	}
+
+	if len(lines) != len(want) {
+		t.Fatalf("expected %d entries, got %d:\n%s", len(want), len(lines), entries)
+	}
+	for i, w := range want {
+		if lines[i] != w {
+			t.Errorf("line[%d] = %q, want %q", i, lines[i], w)
+		}
+	}
+	if skipped != 2 {
+		t.Errorf("skipped = %d, want 2", skipped)
+	}
+}
+
+func TestParseHostsContentCRLFAndEmpty(t *testing.T) {
+	entries, skipped := ParseHostsContent("10.0.0.1 a.dev\r\n10.0.0.2 b.dev\r\n")
+	if entries != "10.0.0.1 a.dev\n10.0.0.2 b.dev" {
+		t.Errorf("CRLF input parsed to %q", entries)
+	}
+	if skipped != 0 {
+		t.Errorf("skipped = %d, want 0", skipped)
+	}
+
+	entries, skipped = ParseHostsContent("# only comments\n\n   \n")
+	if entries != "" {
+		t.Errorf("expected empty result, got %q", entries)
+	}
+	if skipped != 0 {
+		t.Errorf("skipped = %d, want 0", skipped)
 	}
 }

@@ -7,8 +7,49 @@ import (
 	"unicode/utf8"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/jr/lazyhosts/internal/hostctl"
 	"github.com/jr/lazyhosts/internal/state"
 )
+
+// fitEditorLine trims a line to width display cells so long pasted lines cannot
+// wrap and blow up the dialog. cursorCol is the cursor's rune index on this
+// line, or -1 for lines without the cursor; the window scrolls right to keep
+// the cursor visible. It returns the visible slice and the cursor index in it.
+func fitEditorLine(line string, cursorCol, width int) (string, int) {
+	if width < 4 {
+		width = 4
+	}
+	runes := []rune(line)
+	cellWidth := make([]int, len(runes))
+	for i, r := range runes {
+		cellWidth[i] = lipgloss.Width(string(r))
+	}
+
+	start := 0
+	if cursorCol > 0 {
+		start = cursorCol
+		for used := 0; start > 0 && used+cellWidth[start-1] < width; start-- {
+			used += cellWidth[start-1]
+		}
+	}
+
+	end, used := start, 0
+	for end < len(runes) && used+cellWidth[end] < width {
+		used += cellWidth[end]
+		end++
+	}
+
+	return string(runes[start:end]), cursorCol - start
+}
+
+// countEntries reports how many "IP DOMAIN" entries the editor buffer yields.
+func countEntries(buffer string) int {
+	entries, _ := hostctl.ParseHostsContent(buffer)
+	if entries == "" {
+		return 0
+	}
+	return strings.Count(entries, "\n") + 1
+}
 
 // Renderer handles all view rendering.
 type Renderer struct {
@@ -337,9 +378,9 @@ func (r *Renderer) overlayInput(s *state.AppState) string {
 	var title string
 	switch s.InputMode {
 	case state.InputAddName:
-		title = "Add New Profile"
+		title = "New Profile — Name"
 	case state.InputAddEntries:
-		title = "Add Profile Entries"
+		title = "New Profile — Entries"
 	case state.InputImportName:
 		title = "Import Profile"
 	case state.InputImportPath:
@@ -369,13 +410,23 @@ func (r *Renderer) overlayInput(s *state.AppState) string {
 			editorHeight = 20
 		}
 
-		// Show lines with cursor
-		for i, line := range editorLines {
-			if i >= editorHeight {
-				lines = append(lines, HelpDescStyle.Render(fmt.Sprintf("  ... (%d more lines)", len(editorLines)-i)))
-				break
-			}
+		// Scroll the window so the cursor line stays visible after a long paste.
+		start := 0
+		if s.TextCursorRow >= editorHeight {
+			start = s.TextCursorRow - editorHeight + 1
+		}
+		end := start + editorHeight
+		if end > len(editorLines) {
+			end = len(editorLines)
+		}
+		if start > 0 {
+			lines = append(lines, HelpDescStyle.Render(fmt.Sprintf("  ... (%d lines above)", start)))
+		}
 
+		// Show lines with cursor
+		lineWidth := popupWidth - 9
+		for i := start; i < end; i++ {
+			line := editorLines[i]
 			lineNum := HelpDescStyle.Render(fmt.Sprintf("%3d ", i+1))
 			if i == s.TextCursorRow {
 				col := s.TextCursorCol
@@ -383,15 +434,20 @@ func (r *Renderer) overlayInput(s *state.AppState) string {
 				if col > lineRuneLen {
 					col = lineRuneLen
 				}
-				runes := []rune(line)
+				visible, col := fitEditorLine(line, col, lineWidth)
+				runes := []rune(visible)
 				before := string(runes[:col])
 				after := string(runes[col:])
 				cursor := "█"
 				displayLine := lineNum + EnabledStyle.Render(before+cursor+after)
 				lines = append(lines, displayLine)
 			} else {
-				lines = append(lines, lineNum+DetailValueStyle.Render(line))
+				visible, _ := fitEditorLine(line, -1, lineWidth)
+				lines = append(lines, lineNum+DetailValueStyle.Render(visible))
 			}
+		}
+		if end < len(editorLines) {
+			lines = append(lines, HelpDescStyle.Render(fmt.Sprintf("  ... (%d more lines)", len(editorLines)-end)))
 		}
 
 		// If buffer is empty, show placeholder with cursor
@@ -399,15 +455,16 @@ func (r *Renderer) overlayInput(s *state.AppState) string {
 			if s.TextBuffer == "Loading..." {
 				lines = append(lines, LoadingStyle.Render("  Loading entries..."))
 			} else {
-				lines = append(lines, HelpDescStyle.Render("  1 ")+EnabledStyle.Render("█"))
-				lines = append(lines, HelpDescStyle.Render("  (format: IP DOMAIN, one per line)"))
+				lines = append(lines, HelpDescStyle.Render("  Paste with Cmd+V / Ctrl+V — comments, blank lines"))
+				lines = append(lines, HelpDescStyle.Render("  and headers are stripped automatically."))
 			}
 		}
 
 		lines = append(lines, "")
-		lines = append(lines, fmt.Sprintf("  %s save    %s cancel",
+		lines = append(lines, fmt.Sprintf("  %s save    %s cancel    %s",
 			HelpKeyStyle.Render("Ctrl+S"),
 			HelpKeyStyle.Render("Esc"),
+			HelpDescStyle.Render(fmt.Sprintf("%d valid entries", countEntries(s.TextBuffer))),
 		))
 	} else {
 		// Single-line input

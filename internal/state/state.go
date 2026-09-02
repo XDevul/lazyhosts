@@ -10,15 +10,15 @@ import (
 type InputMode int
 
 const (
-	InputNone         InputMode = iota
-	InputAddName                // entering profile name for add
-	InputAddEntries             // entering host entries for add
-	InputImportName             // entering profile name for import
-	InputImportPath             // entering file path for import
-	InputEditEntries            // editing entries for existing profile
-	InputRenameName             // entering new name for rename
-	InputCopyName               // entering new name for copy
-	InputBatchIP                // entering new IP for batch change
+	InputNone        InputMode = iota
+	InputAddName               // entering profile name for add
+	InputAddEntries            // entering host entries for add
+	InputImportName            // entering profile name for import
+	InputImportPath            // entering file path for import
+	InputEditEntries           // editing entries for existing profile
+	InputRenameName            // entering new name for rename
+	InputCopyName              // entering new name for copy
+	InputBatchIP               // entering new IP for batch change
 )
 
 // AppState holds all application state, separated from UI concerns.
@@ -42,13 +42,14 @@ type AppState struct {
 	HasSudo        bool
 
 	// Input dialog state
-	InputMode     InputMode
-	InputLabel    string // label shown above the input field
-	InputBuffer   string // single-line text buffer
-	TextBuffer    string // multi-line text buffer
-	TextCursorRow int    // cursor row in multi-line editor
-	TextCursorCol int    // cursor col in multi-line editor
-	EditTarget    string // profile name being edited
+	InputMode      InputMode
+	InputLabel     string // label shown above the input field
+	InputBuffer    string // single-line text buffer
+	TextBuffer     string // multi-line text buffer
+	TextCursorRow  int    // cursor row in multi-line editor
+	TextCursorCol  int    // cursor col in multi-line editor
+	EditTarget     string // profile name being edited
+	PendingEntries string // parsed entries waiting for a profile name
 }
 
 // NewAppState creates a fresh application state.
@@ -132,6 +133,7 @@ func (s *AppState) ResetInput() {
 	s.TextCursorRow = 0
 	s.TextCursorCol = 0
 	s.EditTarget = ""
+	s.PendingEntries = ""
 }
 
 // IsInInputMode returns true if any input dialog is active.

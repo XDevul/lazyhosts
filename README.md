@@ -8,6 +8,8 @@ A terminal TUI for managing `/etc/hosts` profiles via [hostctl](https://github.c
 
 - Two-pane layout: profile list + detail/preview panel
 - Enable/disable hostctl profiles with confirmation dialog
+- Add a profile by pasting a whole hosts block (comments, blank lines and
+  multi-hostname lines are parsed automatically)
 - Fuzzy search/filter profiles with `/`
 - Live `/etc/hosts` preview
 - Sudo status detection

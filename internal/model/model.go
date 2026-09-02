@@ -1,6 +1,7 @@
 package model
 
 import (
+	"fmt"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -190,9 +191,11 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 
 	case key.Matches(msg, m.keys.Add):
-		m.state.InputMode = state.InputAddName
-		m.state.InputLabel = "New profile name:"
-		m.state.InputBuffer = ""
+		m.state.InputMode = state.InputAddEntries
+		m.state.InputLabel = "Paste a hosts block, or type 'IP DOMAIN' per line:"
+		m.state.TextBuffer = ""
+		m.state.TextCursorRow = 0
+		m.state.TextCursorCol = 0
 
 	case key.Matches(msg, m.keys.Import):
 		m.state.InputMode = state.InputImportName
@@ -298,10 +301,20 @@ func (m Model) handleInputKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.state.InputBuffer += " "
 
 	case tea.KeyRunes:
-		m.state.InputBuffer += string(msg.Runes)
+		m.state.InputBuffer += firstLine(msg.Runes)
 	}
 
 	return m, nil
+}
+
+// firstLine keeps only the first line of an insertion, so a multi-line paste
+// into a single-line field cannot swallow a whole hosts block.
+func firstLine(runes []rune) string {
+	text := sanitizeInsertion(runes)
+	if i := strings.IndexByte(text, '\n'); i >= 0 {
+		text = text[:i]
+	}
+	return strings.TrimSpace(text)
 }
 
 func (m Model) submitSingleLineInput() (tea.Model, tea.Cmd) {
@@ -345,11 +358,12 @@ func (m Model) submitSingleLineInput() (tea.Model, tea.Cmd) {
 				return m, m.clearStatusAfter(3 * time.Second)
 			}
 		}
-		m.state.EditTarget = value
-		m.state.InputMode = state.InputAddEntries
-		m.state.InputLabel = "Add entries for '" + value + "'  (IP DOMAIN per line, Ctrl+S to save):"
-		m.state.InputBuffer = ""
-		m.state.TextBuffer = ""
+		entries := m.state.PendingEntries
+		count := len(strings.Split(entries, "\n"))
+		m.state.ResetInput()
+		m.state.Loading = true
+		m.state.SetStatus("Adding profile '"+value+"'"+nameNote+"...", false)
+		return m, m.addProfile(value, entries, fmt.Sprintf("Add %s (%d entries)", value, count))
 
 	case state.InputImportName:
 		// Check if profile already exists
@@ -545,17 +559,49 @@ func (m *Model) editorMoveRight(lines []string, row int) {
 	}
 }
 
+// sanitizeInsertion normalizes pasted text: CRLF/CR become LF and control
+// characters other than newline and tab are dropped.
+func sanitizeInsertion(runes []rune) string {
+	text := strings.ReplaceAll(string(runes), "\r\n", "\n")
+	text = strings.ReplaceAll(text, "\r", "\n")
+	return strings.Map(func(r rune) rune {
+		if r < 0x20 && r != '\n' && r != '\t' {
+			return -1
+		}
+		return r
+	}, text)
+}
+
+// editorInsertRunes inserts text at the cursor. A multi-line insertion (a paste)
+// splits the current line and leaves the cursor at the end of the inserted text.
 func (m *Model) editorInsertRunes(lines []string, row, col int, runes []rune) {
-	insertion := string(runes)
-	if len(lines) == 0 {
-		m.state.TextBuffer = insertion
-		m.state.TextCursorCol = runeLen(insertion)
+	insertion := sanitizeInsertion(runes)
+	if insertion == "" {
 		return
 	}
+	if len(lines) == 0 {
+		lines = []string{""}
+		row, col = 0, 0
+	}
+
 	line := lines[row]
-	lines[row] = runeSlice(line, 0, col) + insertion + runeSlice(line, col, runeLen(line))
-	m.state.TextBuffer = strings.Join(lines, "\n")
-	m.state.TextCursorCol = col + runeLen(insertion)
+	before := runeSlice(line, 0, col)
+	after := runeSlice(line, col, runeLen(line))
+
+	segments := strings.Split(insertion, "\n")
+	segments[0] = before + segments[0]
+	last := len(segments) - 1
+	endCol := runeLen(segments[last])
+	segments[last] += after
+
+	newLines := make([]string, 0, len(lines)+last)
+	newLines = append(newLines, lines[:row]...)
+	newLines = append(newLines, segments...)
+	newLines = append(newLines, lines[row+1:]...)
+
+	m.state.TextBuffer = strings.Join(newLines, "\n")
+	m.state.TextCursorRow = row + last
+	m.state.TextCursorCol = endCol
 }
 
 func (m Model) submitTextEditor() (tea.Model, tea.Cmd) {
@@ -565,21 +611,34 @@ func (m Model) submitTextEditor() (tea.Model, tea.Cmd) {
 		return m, m.clearStatusAfter(3 * time.Second)
 	}
 
-	name := m.state.EditTarget
-	mode := m.state.InputMode
-	m.state.ResetInput()
-	m.state.Loading = true
-
-	switch mode {
-	case state.InputAddEntries:
-		m.state.SetStatus("Adding profile '"+name+"'...", false)
-		return m, m.addProfile(name, content)
-	case state.InputEditEntries:
-		m.state.SetStatus("Updating profile '"+name+"'...", false)
-		return m, m.updateProfile(name, content)
+	// The buffer may hold a whole pasted hosts file: normalize it into
+	// plain "IP DOMAIN" lines before handing it to hostctl.
+	entries, skipped := hostctl.ParseHostsContent(content)
+	if entries == "" {
+		m.state.SetStatus("No valid 'IP DOMAIN' entries found", true)
+		return m, m.clearStatusAfter(5 * time.Second)
 	}
 
-	return m, nil
+	summary := fmt.Sprintf("%d entries", len(strings.Split(entries, "\n")))
+	if skipped > 0 {
+		summary += fmt.Sprintf(", %d lines skipped", skipped)
+	}
+
+	// A new profile is named after the entries are in, so a paste can go
+	// straight into the editor without passing through the name field.
+	if m.state.InputMode == state.InputAddEntries {
+		m.state.PendingEntries = entries
+		m.state.InputMode = state.InputAddName
+		m.state.InputLabel = "Name this profile (" + summary + ")  [lowercase, digits, - _]:"
+		m.state.InputBuffer = ""
+		return m, nil
+	}
+
+	name := m.state.EditTarget
+	m.state.ResetInput()
+	m.state.Loading = true
+	m.state.SetStatus("Updating profile '"+name+"' ("+summary+")...", false)
+	return m, m.updateProfile(name, entries, fmt.Sprintf("Update %s (%s)", name, summary))
 }
 
 func (m Model) handleSearchKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -697,10 +756,10 @@ func (m Model) disableProfile(name string) tea.Cmd {
 	}
 }
 
-func (m Model) addProfile(name string, entries string) tea.Cmd {
+func (m Model) addProfile(name string, entries string, action string) tea.Cmd {
 	return func() tea.Msg {
 		result := hostctl.AddProfile(name, entries)
-		return commandDoneMsg{result: result, action: "Add " + name}
+		return commandDoneMsg{result: result, action: action}
 	}
 }
 
@@ -711,10 +770,10 @@ func (m Model) importProfile(name string, filePath string) tea.Cmd {
 	}
 }
 
-func (m Model) updateProfile(name string, entries string) tea.Cmd {
+func (m Model) updateProfile(name string, entries string, action string) tea.Cmd {
 	return func() tea.Msg {
 		result := hostctl.UpdateProfile(name, entries)
-		return commandDoneMsg{result: result, action: "Update " + name}
+		return commandDoneMsg{result: result, action: action}
 	}
 }
 
