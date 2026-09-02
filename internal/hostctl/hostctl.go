@@ -330,6 +330,16 @@ func BatchChangeIP(name string, newIP string) Result {
 		return Result{Error: fmt.Errorf("batch change IP failed: %w", err), ExecutedAt: time.Now()}
 	}
 
+	replaced := batchReplaceIP(entries, newIP)
+	if replaced == "" {
+		return Result{Error: fmt.Errorf("no entries to update"), ExecutedAt: time.Now()}
+	}
+
+	return UpdateProfile(name, replaced)
+}
+
+// batchReplaceIP replaces the IP field in each "IP HOST" line with newIP.
+func batchReplaceIP(entries string, newIP string) string {
 	var newLines []string
 	for _, line := range strings.Split(entries, "\n") {
 		line = strings.TrimSpace(line)
@@ -342,12 +352,7 @@ func BatchChangeIP(name string, newIP string) Result {
 			newLines = append(newLines, strings.Join(fields, " "))
 		}
 	}
-
-	if len(newLines) == 0 {
-		return Result{Error: fmt.Errorf("no entries to update"), ExecutedAt: time.Now()}
-	}
-
-	return UpdateProfile(name, strings.Join(newLines, "\n"))
+	return strings.Join(newLines, "\n")
 }
 
 // parseJSON parses hostctl JSON output, deduplicating profiles.
