@@ -13,8 +13,12 @@ import (
 	"time"
 )
 
-// validProfileName only allows alphanumeric, underscore, and hyphen.
-var validProfileName = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
+// validProfileName only allows lowercase alphanumeric, underscore, and hyphen.
+// Uppercase is excluded on purpose: `hostctl add EAS` writes the marker
+// "# profile.on EAS" into the hosts file, but hostctl's own list parser never
+// reads a capitalized name back, so the entries silently end up looking like
+// part of the default profile and can no longer be disabled or removed.
+var validProfileName = regexp.MustCompile(`^[a-z0-9_-]+$`)
 
 // Profile represents a hostctl profile with its status.
 type Profile struct {
@@ -39,13 +43,27 @@ type Result struct {
 	ExecutedAt time.Time
 }
 
+// NormalizeName folds a profile name into the form hostctl can read back.
+func NormalizeName(name string) string {
+	return strings.ToLower(strings.TrimSpace(name))
+}
+
+// ValidateProfileName lets callers check a name before running any command,
+// so a bad name can be rejected while the input dialog is still open.
+func ValidateProfileName(name string) error {
+	return validateName(name)
+}
+
 // validateName checks that a profile name contains only safe characters.
 func validateName(name string) error {
 	if name == "" {
 		return fmt.Errorf("profile name cannot be empty")
 	}
+	if name != NormalizeName(name) {
+		return fmt.Errorf("invalid profile name %q: hostctl cannot list profiles with capitals — use %q", name, NormalizeName(name))
+	}
 	if !validProfileName.MatchString(name) {
-		return fmt.Errorf("invalid profile name %q: only [a-zA-Z0-9_-] allowed", name)
+		return fmt.Errorf("invalid profile name %q: only [a-z0-9_-] allowed", name)
 	}
 	return nil
 }

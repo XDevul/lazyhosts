@@ -311,6 +311,31 @@ func (m Model) submitSingleLineInput() (tea.Model, tea.Cmd) {
 		return m, m.clearStatusAfter(3 * time.Second)
 	}
 
+	// hostctl writes a capitalized profile name into the hosts file but never
+	// lists it back, so fold profile names to lowercase before creating anything.
+	var lowercasedFrom string
+	switch m.state.InputMode {
+	case state.InputAddName, state.InputImportName, state.InputRenameName, state.InputCopyName:
+		if folded := hostctl.NormalizeName(value); folded != value {
+			lowercasedFrom = value
+			value = folded
+		}
+	}
+	nameNote := ""
+	if lowercasedFrom != "" {
+		nameNote = " (lowercased from '" + lowercasedFrom + "')"
+	}
+
+	// Reject a bad name while the dialog is still open, so a typo never costs
+	// the user the entries they just pasted.
+	switch m.state.InputMode {
+	case state.InputAddName, state.InputImportName, state.InputRenameName, state.InputCopyName:
+		if err := hostctl.ValidateProfileName(value); err != nil {
+			m.state.SetStatus(err.Error(), true)
+			return m, m.clearStatusAfter(5 * time.Second)
+		}
+	}
+
 	switch m.state.InputMode {
 	case state.InputAddName:
 		// Check if profile already exists
@@ -359,7 +384,7 @@ func (m Model) submitSingleLineInput() (tea.Model, tea.Cmd) {
 		newName := value
 		m.state.ResetInput()
 		m.state.Loading = true
-		m.state.SetStatus("Renaming '"+oldName+"' to '"+newName+"'...", false)
+		m.state.SetStatus("Renaming '"+oldName+"' to '"+newName+"'"+nameNote+"...", false)
 		return m, m.renameProfile(oldName, newName)
 
 	case state.InputCopyName:
@@ -374,7 +399,7 @@ func (m Model) submitSingleLineInput() (tea.Model, tea.Cmd) {
 		newName := value
 		m.state.ResetInput()
 		m.state.Loading = true
-		m.state.SetStatus("Copying '"+srcName+"' to '"+newName+"'...", false)
+		m.state.SetStatus("Copying '"+srcName+"' to '"+newName+"'"+nameNote+"...", false)
 		return m, m.copyProfile(srcName, newName)
 
 	case state.InputBatchIP:

@@ -52,7 +52,7 @@ func TestParseJSONInvalid(t *testing.T) {
 }
 
 func TestValidateName(t *testing.T) {
-	valid := []string{"dev", "sit", "prod", "my-profile", "test_123", "A", "a1-b2_c3"}
+	valid := []string{"dev", "sit", "prod", "my-profile", "test_123", "a", "a1-b2_c3"}
 	for _, name := range valid {
 		if err := validateName(name); err != nil {
 			t.Errorf("validateName(%q) should pass, got: %v", name, err)
@@ -73,6 +73,20 @@ func TestValidateName(t *testing.T) {
 	for _, name := range invalid {
 		if err := validateName(name); err == nil {
 			t.Errorf("validateName(%q) should fail, but passed", name)
+		}
+	}
+}
+
+func TestNormalizeName(t *testing.T) {
+	cases := map[string]string{
+		"EAS":     "eas",
+		"EAS-PMO": "eas-pmo",
+		"  dev  ": "dev",
+		"dev":     "dev",
+	}
+	for in, want := range cases {
+		if got := NormalizeName(in); got != want {
+			t.Errorf("NormalizeName(%q) = %q, want %q", in, got, want)
 		}
 	}
 }
